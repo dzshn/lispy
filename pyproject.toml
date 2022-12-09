@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "lispy"
+version = "0.1.0"
+description = "qhar"
+authors = ["Sofia Lima <me@dzshn.xyz>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.group.dev.dependencies]
+tox = "^4.0.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
