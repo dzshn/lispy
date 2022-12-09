@@ -11,6 +11,18 @@ import lispy
 (Print (Factorial @10))  # => 3628800
 ```
 
+## Features
+
+- Virtually infinite recursion (based on [trampolines](https://en.wikipedia.org/wiki/Trampoline_(computing)))
+- Python data types, lisp structure
+- Built-in REPL
+
+## TODO
+
+- [x] Trampoline executor
+- [ ] Tail recursion optimisation
+- [ ] More interop with Python
+
 ## Install
 
 Install with pip: (only requires python >= 3.10)

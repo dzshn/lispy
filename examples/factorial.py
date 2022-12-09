@@ -6,4 +6,4 @@ import lispy
         @1
         (Mul @n (Factorial (Sub @n @1)))))
 
-(Print (Factorial @10))
+(Print @"1500! =" (Factorial @1500))
