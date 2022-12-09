@@ -27,5 +27,19 @@ $ poetry install
 
 ## Usage
 
-The [examples](examples/) folder showcases some of the language's features.
+For usage in scripts, simply add `import lispy` to the first line of the file
 
+For an interactive REPL, run `python -m lispy`
+
+## Syntax
+
+As a dialect of Lisp, [S-expressions](https://en.wikipedia.org/wiki/S-expression)
+are used to denote code. Unfortunately, expressions in the form `(a b c)` are
+syntax errors in Python, so it is necessary to add "filler operators" between
+expression atoms to convince it otherwise, like so: `(a @b @c)`
+
+Anything that is not a constant, identifier or parenthesis is ignored.
+
+## Built-in functions
+
+TODO
