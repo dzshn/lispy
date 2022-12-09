@@ -10,13 +10,13 @@ import tokenize
 import runpy
 import sys
 from collections import ChainMap
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from typing import Any, TypeAlias
 
 
 __version__ = importlib.metadata.version("lispy")
 
-LispyFunc: TypeAlias = "Callable[[Context, Sequence[Any]], Any]"
+LispyFunc: TypeAlias = "Callable[[Context, Sequence[Any]], Generator]"
 stdlib: dict[str, Any] = {}
 
 
@@ -98,15 +98,33 @@ def lispy_exec(
     res = []
     ctx = ctx or Context()
     for i in root.children:
-        res.append(exec_node(i, ctx))
+        res.append(exec_in_trampoline(i, ctx))
     return res
 
 
-def exec_node(node: Node | Name | Const, ctx: Context) -> Any:
-    """Main execution function. Awfully recursive."""
+_Sentinel = object()
+
+def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
+    stack = [exec_node(node, ctx)]
+    return_value = _Sentinel
+    while stack:
+        try:
+            if return_value is _Sentinel:
+                stack.append(next(stack[-1]))
+            else:
+                stack.append(stack[-1].send(return_value))
+                return_value = _Sentinel
+        except StopIteration as e:
+            stack.pop()
+            return_value = e.value
+    return return_value
+
+
+def exec_node(node: Node | Name | Const, ctx: Context) -> Generator:
+    """Main execution function. No longer awfully recursive."""
     if isinstance(node, Node):
-        # TODO: tail recursion :trollface:
-        return exec_node(node.children[0], ctx)(ctx, node.children[1:])
+        func: LispyFunc = yield exec_node(node.children[0], ctx)
+        return (yield func(ctx, node.children[1:]))
     if isinstance(node, Name):
         try:
             return ChainMap(*ctx.scopes)[node.value]
@@ -128,7 +146,10 @@ def std_fn(name: str) -> Callable[[LispyFunc], Any]:
 def eager_fn(func: Callable[..., Any]) -> LispyFunc:
     """Wrapper for functions requiring immediately executed args."""
     def wrapper(ctx: Context, args: Sequence[Any]):
-        return func(*map(lambda a: exec_node(a, ctx), args))
+        new_args = []
+        for a in args:
+            new_args.append((yield exec_node(a, ctx)))
+        return func(*new_args)
 
     return wrapper
 
@@ -162,7 +183,7 @@ stdlib["Ge"] = eager_fn(operator.ge)
 
 
 @std_fn("Def")
-def define(ctx: Context, args: Sequence[Any]) -> None:
+def define(ctx: Context, args: Sequence[Any]):
     """Define a function or variable."""
     if len(args) not in {2, 3} or not isinstance(args[0], Name):
         raise TypeError
@@ -170,41 +191,42 @@ def define(ctx: Context, args: Sequence[Any]) -> None:
     if len(args) == 2:
         if not isinstance(args[1], (Node, Name, Const)):
             raise TypeError
-        ctx.scopes[0][name] = exec_node(args[1], ctx)
+        ctx.scopes[0][name] = (yield exec_node(args[1], ctx))
     elif len(args) == 3:
         if (
             not isinstance(args[1], Node)
             or not isinstance(args[2], (Node, Name, Const))
         ):
             raise TypeError
+
+        func_body = args[2]
         func_defaults: dict[str, Any] = {}
         func_args: list[str] = []
+
         for i in args[1].children:
             if isinstance(i, Node):
                 arg, default = i.children
                 if not isinstance(arg, Name):
                     raise TypeError
-                func_defaults[arg.value] = exec_node(default, ctx)
+                func_defaults[arg.value] = yield exec_node(default, ctx)
                 func_args.append(arg.value)
             elif isinstance(i, Name):
                 func_args.append(i.value)
             else:
                 raise TypeError
 
-        func_body = args[2]
-
         def lispy_func(ctx: Context, args: Sequence[Any]):
-            func_scope = func_defaults | dict(
-                zip(func_args, map(lambda a: exec_node(a, ctx), args))
-            )
+            func_scope = func_defaults.copy()
+            for name, value in zip(func_args, args):
+                func_scope[name] = yield exec_node(value, ctx)
             ctx = Context([func_scope, *ctx.scopes])
-            return exec_node(func_body, ctx)
+            return (yield exec_node(func_body, ctx))
 
         ctx.scopes[0][name] = lispy_func
 
 
 @std_fn("Let")
-def let(ctx: Context, args: Sequence[Any]) -> None:
+def let(ctx: Context, args: Sequence[Any]):
     """Initialize variables in new scope and execute a expression."""
     if len(args) != 2 or not isinstance(args[0], Node):
         raise TypeError
@@ -219,13 +241,13 @@ def let(ctx: Context, args: Sequence[Any]) -> None:
         if not isinstance(decl, Node):
             raise TypeError
         *identifiers, value = decl.children
-        value = exec_node(value, ctx)
+        value = yield exec_node(value, ctx)
         for i in identifiers:
             if not isinstance(i, Name):
                 raise TypeError
             let_scope[i.value] = value
 
-    return exec_node(args[1], Context([let_scope, *ctx.scopes]))
+    return (yield exec_node(args[1], Context([let_scope, *ctx.scopes])))
 
 
 @std_fn("If")
@@ -233,11 +255,18 @@ def if_(ctx: Context, args: Sequence[Any]) -> Any:
     """Conditionally execute expressions."""
     if len(args) not in {2, 3}:
         raise TypeError
-    if exec_node(args[0], ctx):
-        return exec_node(args[1], ctx)
+    if (yield exec_node(args[0], ctx)):
+        return (yield exec_node(args[1], ctx))
     if len(args) > 2:
-        return exec_node(args[2], ctx)
+        return (yield exec_node(args[2], ctx))
     return None
+
+
+@std_fn("List")
+@eager_fn
+def list_(*args: Any) -> list[Any]:
+    """Construct a list from arguments"""
+    return list(args)
 
 
 frame = sys._getframe(1)

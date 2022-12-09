@@ -9,5 +9,6 @@ import lispy
                 @False
                 (IsPrime @n (Sub @i @1))))))
 
-(Print (IsPrime @64)) # => False
-(Print (IsPrime @127)) # => True
+(Print @"64:" (IsPrime @64)) # => False
+(Print @"127:" (IsPrime @127)) # => True
+(Print @"1117:" (IsPrime @1117)) # => True
