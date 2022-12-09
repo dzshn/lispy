@@ -110,6 +110,8 @@ def eager_fn(func: Callable[..., Any]) -> LispyFunc:
 stdlib["True"] = True
 stdlib["False"] = False
 stdlib["None"] = None
+stdlib["Int"] = eager_fn(int)
+stdlib["Float"] = eager_fn(float)
 stdlib["Print"] = eager_fn(print)
 stdlib["Abs"] = eager_fn(abs)
 stdlib["Add"] = eager_fn(operator.add)
@@ -149,16 +151,24 @@ def define(ctx: Context, args: Sequence[Any]) -> None:
             or not isinstance(args[2], (Node, Name, Const))
         ):
             raise TypeError
+        func_defaults: dict[str, Any] = {}
         func_args: list[str] = []
         for i in args[1].children:
-            if not isinstance(i, Name):
+            if isinstance(i, Node):
+                arg, default = i.children
+                if not isinstance(arg, Name):
+                    raise TypeError
+                func_defaults[arg.value] = exec_node(default, ctx)
+                func_args.append(arg.value)
+            elif isinstance(i, Name):
+                func_args.append(i.value)
+            else:
                 raise TypeError
-            func_args.append(i.value)
 
         func_body = args[2]
 
         def lispy_func(ctx: Context, args: Sequence[Any]):
-            func_scope = dict(
+            func_scope = func_defaults | dict(
                 zip(func_args, map(lambda a: exec_node(a, ctx), args))
             )
             ctx = Context([func_scope, *ctx.scopes])
