@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.metadata
 import operator
 import dataclasses
 import tokenize
@@ -10,8 +11,10 @@ import runpy
 import sys
 from collections import ChainMap
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TypeAlias
+from typing import Any, TypeAlias
 
+
+__version__ = importlib.metadata.version("lispy")
 
 LispyFunc: TypeAlias = "Callable[[Context, Sequence[Any]], Any]"
 stdlib: dict[str, Any] = {}
@@ -44,7 +47,9 @@ class Context:
     )
 
 
-def lispy_exec(readline: Callable[[], bytes], ctx: Context | None = None) -> None:
+def lispy_exec(
+    readline: Callable[[], bytes], ctx: Context | None = None
+) -> list[Any]:
     """Execute lispy code."""
     root = Node([], None)
     node = root
@@ -64,9 +69,11 @@ def lispy_exec(readline: Callable[[], bytes], ctx: Context | None = None) -> Non
         if t in {tokenize.NUMBER, tokenize.STRING}:
             node.children.append(Const(ast.literal_eval(s)))
 
+    res = []
     ctx = ctx or Context()
     for i in root.children:
-        exec_node(i, ctx)
+        res.append(exec_node(i, ctx))
+    return res
 
 
 def exec_node(node: Node | Name | Const, ctx: Context) -> Any:
@@ -74,7 +81,10 @@ def exec_node(node: Node | Name | Const, ctx: Context) -> Any:
     if isinstance(node, Node):
         return exec_node(node.children[0], ctx)(ctx, node.children[1:])
     if isinstance(node, Name):
-        return ChainMap(*reversed(ctx.scopes))[node.value]
+        try:
+            return ChainMap(*ctx.scopes)[node.value]
+        except KeyError:
+            raise NameError(f"name {node.value} is not defined") from None
     if isinstance(node, Const):
         return node.value
     raise TypeError
@@ -124,33 +134,41 @@ stdlib["Ge"] = eager_fn(operator.ge)
 
 @std_fn("Def")
 def define(ctx: Context, args: Sequence[Any]) -> None:
-    assert isinstance(args[0], Name)
+    """Define a function or variable."""
+    if len(args) not in {2, 3} or not isinstance(args[0], Name):
+        raise TypeError
     name = args[0].value
     if len(args) == 2:
-        assert isinstance(args[1], (Node, Name, Const))
-        ctx.scopes[-1][name] = exec_node(args[1], ctx)
+        if not isinstance(args[1], (Node, Name, Const)):
+            raise TypeError
+        ctx.scopes[0][name] = exec_node(args[1], ctx)
     elif len(args) == 3:
-        assert isinstance(args[1], Node)
-        assert isinstance(args[2], (Node, Name, Const))
+        if (
+            not isinstance(args[1], Node)
+            or not isinstance(args[2], (Node, Name, Const))
+        ):
+            raise TypeError
         func_args: list[str] = []
         for i in args[1].children:
-            assert isinstance(i, Name)
+            if not isinstance(i, Name):
+                raise TypeError
             func_args.append(i.value)
 
         func_body = args[2]
 
         def lispy_func(ctx: Context, args: Sequence[Any]):
-            func_scope = dict(zip(func_args, map(lambda a: exec_node(a, ctx), args)))
-            ctx = Context([*ctx.scopes, func_scope])
+            func_scope = dict(
+                zip(func_args, map(lambda a: exec_node(a, ctx), args))
+            )
+            ctx = Context([func_scope, *ctx.scopes])
             return exec_node(func_body, ctx)
 
-        ctx.scopes[-1][name] = lispy_func
-    else:
-        raise RuntimeError
+        ctx.scopes[0][name] = lispy_func
 
 
 @std_fn("Let")
 def let(ctx: Context, args: Sequence[Any]) -> None:
+    """Initialize variables in new scope and execute a expression."""
     if len(args) != 2 or not isinstance(args[0], Node):
         raise TypeError
 
@@ -170,14 +188,18 @@ def let(ctx: Context, args: Sequence[Any]) -> None:
                 raise TypeError
             let_scope[i.value] = value
 
-    return exec_node(args[1], Context([*ctx.scopes, let_scope]))
+    return exec_node(args[1], Context([let_scope, *ctx.scopes]))
 
 
 @std_fn("If")
 def if_(ctx: Context, args: Sequence[Any]) -> Any:
+    """Conditionally execute expressions."""
+    if len(args) not in {2, 3}:
+        raise TypeError
     if exec_node(args[0], ctx):
         return exec_node(args[1], ctx)
-    return exec_node(args[2], ctx)
+    if len(args) > 2:
+        return exec_node(args[2], ctx)
 
 
 frame = sys._getframe(1)
@@ -187,6 +209,11 @@ while "importlib" in frame.f_code.co_filename:
     frame = frame.f_back
 
 filename = frame.f_code.co_filename
+if filename == "<stdin>":
+    raise RuntimeError(
+        "can't work from stdin! "
+        "(run `python -m lispy` instead for a REPL)"
+    )
 if filename != runpy.__file__:
     with open(frame.f_code.co_filename, "rb") as src:
         assert src.readline() == b"import lispy\n"
