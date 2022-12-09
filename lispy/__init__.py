@@ -24,7 +24,18 @@ stdlib: dict[str, Any] = {}
 class Node:
     """Generic node for S-expressions."""
     children: list[Node | Name | Const]
-    parent: Node | None = dataclasses.field(repr=False)
+    parent: Node | None
+
+    def __repr__(self) -> str:
+        body = str()
+        for i, child in enumerate(self.children):
+            if i == 0:
+                body += repr(child).strip("@%")
+            else:
+                body += repr(child)
+            body += " "
+
+        return "(" + body.strip() + ")"
 
 
 @dataclasses.dataclass
@@ -32,11 +43,17 @@ class Name:
     """Generic symbol or identifier."""
     value: str
 
+    def __repr__(self) -> str:
+        return f"@{self.value}"
+
 
 @dataclasses.dataclass
 class Const:
     """Generic constant value."""
     value: str | int | float
+
+    def __repr__(self) -> str:
+        return f"%{self.value!r}"
 
 
 @dataclasses.dataclass
@@ -45,6 +62,15 @@ class Context:
     scopes: list[dict[str, Any]] = dataclasses.field(
         default_factory=lambda: [stdlib]
     )
+
+    def __repr__(self) -> str:
+        scopes = str()
+        for i in self.scopes:
+            if i is stdlib:
+                scopes += "Global"
+            else:
+                scopes += ", "
+        return f"Context(scopes=[{scopes.strip(', ')}])"
 
 
 def lispy_exec(
