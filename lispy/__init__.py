@@ -79,6 +79,7 @@ def lispy_exec(
 def exec_node(node: Node | Name | Const, ctx: Context) -> Any:
     """Main execution function. Awfully recursive."""
     if isinstance(node, Node):
+        # TODO: tail recursion :trollface:
         return exec_node(node.children[0], ctx)(ctx, node.children[1:])
     if isinstance(node, Name):
         try:
@@ -200,6 +201,7 @@ def if_(ctx: Context, args: Sequence[Any]) -> Any:
         return exec_node(args[1], ctx)
     if len(args) > 2:
         return exec_node(args[2], ctx)
+    return None
 
 
 frame = sys._getframe(1)
@@ -216,7 +218,8 @@ if filename == "<stdin>":
     )
 if filename != runpy.__file__:
     with open(frame.f_code.co_filename, "rb") as src:
-        assert src.readline() == b"import lispy\n"
+        if src.readline() != b"import lispy\n":
+            raise SyntaxError("lispy code may only start with import lispy")
         lispy_exec(src.readline)
 
     sys.exit()

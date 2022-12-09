@@ -16,7 +16,11 @@ if __name__ == "__main__":
         except ModuleNotFoundError:
             pass
 
-        print(f"LisPy {lispy.__version__} on {platform.python_implementation()} {platform.python_version()} on {platform.system()}")
+        print(
+            f"LisPy {lispy.__version__} on "
+            f"{platform.python_implementation()} {platform.python_version()} "
+            f"on {platform.system()}"
+        )
         print("Copyright (c) 2022 Sofia Lima")
 
         while True:
