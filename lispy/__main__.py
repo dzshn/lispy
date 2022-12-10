@@ -1,12 +1,13 @@
 """Mini interpreter alternative to reparsed hell."""
 import getopt
 import platform
+from tokenize import TokenError
 import traceback
 import sys
 from collections.abc import Generator
 
 import lispy
-from lispy import lispy_exec
+from lispy import lispy_exec, lispy_parse
 
 ENVIRONMENT = (
     f"LisPy {lispy.__version__} on "
@@ -28,8 +29,9 @@ SEE ALSO
 """
 
 
-def _fake_readline(line: bytes) -> Generator[bytes, None, None]:
-    yield from [line]
+def _fake_readline(src: bytes) -> Generator[bytes, None, None]:
+    yield from src.splitlines(keepends=True)
+    yield bytes()
 
 
 def main() -> None:
@@ -49,11 +51,13 @@ def main() -> None:
 
     if args:
         with open(args[0], "rb") as file:
-            lispy_exec(file.readline)
+            for i in lispy_exec(lispy_parse(file.readline)):
+                if i is not None:
+                    print(i)
             sys.exit()
 
     if not sys.stdin.isatty():
-        lispy_exec(lambda: sys.stdin.readline().encode())
+        lispy_exec(lispy_parse(sys.stdin.buffer.readline))
     else:
         try:
             import readline
@@ -66,7 +70,14 @@ def main() -> None:
 
         while True:
             try:
-                line = input("(>>>) ").encode()
+                src = input("(>>>) ").encode() + b"\n"
+                while True:
+                    try:
+                        node = lispy_parse(_fake_readline(src).__next__)
+                    except TokenError:
+                        src += input("(...) ").encode() + b"\n"
+                        continue
+                    break
             except KeyboardInterrupt:
                 print("\nKeyboardInterrupt")
                 continue
@@ -74,15 +85,14 @@ def main() -> None:
                 print()
                 break
 
-            if line == b"help":
+            if src == b"help\n":
                 print("Available symbols:")
                 print(" ", ", ".join(lispy.stdlib.keys()))
                 print("Press EOF (Ctrl+D) to exit. Ctrl+C stops current code.")
                 continue
 
             try:
-                # TODO: multiline input
-                for i in lispy_exec(_fake_readline(line).__next__):
+                for i in lispy_exec(node):
                     if i is not None:
                         print(i)
             except (Exception, KeyboardInterrupt):

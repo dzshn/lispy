@@ -10,7 +10,7 @@ import dataclasses
 import tokenize
 import runpy
 import sys
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from typing import IO, Any, AnyStr, TypeAlias
 
 
@@ -61,7 +61,7 @@ class Const:
 class Context:
     """Context object used in execution."""
     scopes: list[dict[str, Any]] = dataclasses.field(
-        default_factory=lambda: [stdlib]
+        default_factory=lambda: [{}, stdlib]
     )
     recallable: list[LispyFunc] = dataclasses.field(
         default_factory=lambda: []
@@ -78,33 +78,35 @@ class Context:
         return f"Context(scopes=[{scopes.strip(', ')}])"
 
 
-def lispy_exec(
-    readline: Callable[[], bytes], ctx: Context | None = None
-) -> list[Any]:
-    """Execute lispy code."""
+def lispy_parse(readline: Callable[[], bytes]) -> Node:
     root = Node([], None)
     node = root
 
+    # problem?
     for token in tokenize.tokenize(readline):
-        t, s, *_ = token
-
-        if t == tokenize.OP and s == "(":
+        type_, string, *_ = token
+        if type_ == tokenize.OP and string == "(":
             new = Node([], node)
             node.children.append(new)
             node = new
-        if t == tokenize.OP and s == ")":
+        if type_ == tokenize.OP and string == ")":
             assert node.parent
             node = node.parent
-        if t == tokenize.NAME:
-            node.children.append(Name(s))
-        if t in {tokenize.NUMBER, tokenize.STRING}:
-            node.children.append(Const(ast.literal_eval(s)))
+        if type_ == tokenize.NAME:
+            node.children.append(Name(string))
+        if type_ in {tokenize.NUMBER, tokenize.STRING}:
+            node.children.append(Const(ast.literal_eval(string)))
 
-    res = []
-    ctx = ctx or Context()
-    for i in root.children:
-        res.append(exec_in_trampoline(i, ctx))
-    return res
+    return root
+
+
+def lispy_exec(root: Node) -> Iterator[Any]:
+    """Execute lispy code."""
+
+    ctx = Context()
+
+    for node in root.children:
+        yield exec_in_trampoline(node, ctx)
 
 
 def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
@@ -420,6 +422,8 @@ if filename != runpy.__file__ and not filename.endswith("lispy"):
     with open(frame.f_code.co_filename, "rb") as src:
         if src.readline() != b"import lispy\n":
             raise SyntaxError("lispy code may only start with import lispy")
-        lispy_exec(src.readline)
+        for i in lispy_exec(lispy_parse(src.readline)):
+            if i is not None:
+                print(i)
 
     sys.exit()
