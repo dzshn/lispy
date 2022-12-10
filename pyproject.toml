@@ -6,6 +6,9 @@ authors = ["Sofia Lima <me@dzshn.xyz>"]
 license = "MIT"
 readme = "README.md"
 
+[tool.poetry.scripts]
+lispy = "lispy.__main__:main"
+
 [tool.poetry.dependencies]
 python = "^3.10"
 

@@ -281,7 +281,7 @@ if filename == "<stdin>":
         "can't work from stdin! "
         "(run `python -m lispy` instead for a REPL)"
     )
-if filename != runpy.__file__:
+if filename != runpy.__file__ and not filename.endswith("lispy"):
     with open(frame.f_code.co_filename, "rb") as src:
         if src.readline() != b"import lispy\n":
             raise SyntaxError("lispy code may only start with import lispy")
