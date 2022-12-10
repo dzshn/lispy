@@ -63,6 +63,9 @@ class Context:
     scopes: list[dict[str, Any]] = dataclasses.field(
         default_factory=lambda: [stdlib]
     )
+    recallable: list[LispyFunc] = dataclasses.field(
+        default_factory=lambda: []
+    )
 
     def __repr__(self) -> str:
         scopes = str()
@@ -242,7 +245,7 @@ def define(ctx: Context, args: Sequence[Any]):
             for scope in ctx.scopes:
                 if set(scope) != func_vars:
                     scopes.append(scope)
-            ctx = Context(scopes)
+            ctx = Context(scopes, [lispy_func] + ctx.recallable)
             return (yield exec_node(func_body, ctx))
 
         ctx.scopes[0][name] = lispy_func
@@ -276,7 +279,7 @@ def let(ctx: Context, args: Sequence[Any]):
         if set(scope) != let_vars:
             scopes.append(scope)
 
-    return (yield exec_node(args[1], Context(scopes)))
+    return (yield exec_node(args[1], Context(scopes, ctx.recallable)))
 
 
 @std_fn("Lambda")
@@ -306,9 +309,15 @@ def lambda_(ctx: Context, args: Sequence[Any]):
 
     def lispy_func(ctx: Context, args: Sequence[Any]):
         func_scope = func_defaults.copy()
+        scopes = [func_scope]
         for name, value in zip(func_args, args):
-            func_scope[name] = yield exec_node(value, ctx)
-        ctx = Context([func_scope, *ctx.scopes])
+            value = yield exec_node(value, ctx)
+            func_scope[name] = value
+        func_vars = set(func_scope)
+        for scope in ctx.scopes:
+            if set(scope) != func_vars:
+                scopes.append(scope)
+        ctx = Context(scopes, [lispy_func] + ctx.recallable)
         return (yield exec_node(func_body, ctx))
 
     return lispy_func
@@ -321,6 +330,11 @@ def apply(ctx: Context, args: Sequence[Any]):
     func: LispyFunc = yield exec_node(args[0], ctx)
     func_args: Sequence[Any] = yield exec_node(args[1], ctx)
     return (yield func(ctx, [Const(a) for a in func_args]))
+
+
+@std_fn("Recall")
+def recall(ctx: Context, args: Sequence[Any]):
+    return (yield ctx.recallable[-1](ctx, args))
 
 
 @std_fn("Include")
