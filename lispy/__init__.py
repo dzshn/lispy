@@ -234,9 +234,15 @@ def define(ctx: Context, args: Sequence[Any]):
 
         def lispy_func(ctx: Context, args: Sequence[Any]):
             func_scope = func_defaults.copy()
+            scopes = [func_scope]
             for name, value in zip(func_args, args):
-                func_scope[name] = yield exec_node(value, ctx)
-            ctx = Context([func_scope, *ctx.scopes])
+                value = yield exec_node(value, ctx)
+                func_scope[name] = value
+            func_vars = set(func_scope)
+            for scope in ctx.scopes:
+                if set(scope) != func_vars:
+                    scopes.append(scope)
+            ctx = Context(scopes)
             return (yield exec_node(func_body, ctx))
 
         ctx.scopes[0][name] = lispy_func
@@ -248,7 +254,8 @@ def let(ctx: Context, args: Sequence[Any]):
     if len(args) != 2 or not isinstance(args[0], Node):
         raise TypeError
 
-    let_scope = {}
+    let_scope: dict[str, Any] = {}
+    scopes = [let_scope]
     if isinstance(args[0].children[0], Node):
         declarations = args[0].children
     else:
@@ -264,7 +271,12 @@ def let(ctx: Context, args: Sequence[Any]):
                 raise TypeError
             let_scope[i.value] = value
 
-    return (yield exec_node(args[1], Context([let_scope, *ctx.scopes])))
+    let_vars = set(let_scope)
+    for scope in ctx.scopes:
+        if set(scope) != let_vars:
+            scopes.append(scope)
+
+    return (yield exec_node(args[1], Context(scopes)))
 
 
 @std_fn("Lambda")
