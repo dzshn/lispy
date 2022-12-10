@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import importlib.metadata
 import operator
 import dataclasses
@@ -11,16 +12,16 @@ import runpy
 import sys
 from collections import ChainMap
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, TypeAlias
+from typing import IO, Any, AnyStr, TypeAlias
 
 
 __version__ = importlib.metadata.version("lispy")
 
-LispyFunc: TypeAlias = "Callable[[Context, Sequence[Any]], Generator]"
+LispyFunc: TypeAlias = "Callable[[Context, Sequence[Node | Name | Const]], Generator]"
 stdlib: dict[str, Any] = {}
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Node:
     """Generic node for S-expressions."""
     children: list[Node | Name | Const]
@@ -38,7 +39,7 @@ class Node:
         return "(" + body.strip() + ")"
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Name:
     """Generic symbol or identifier."""
     value: str
@@ -47,7 +48,7 @@ class Name:
         return f"@{self.value}"
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Const:
     """Generic constant value."""
     value: str | int | float
@@ -56,7 +57,7 @@ class Const:
         return f"%{self.value!r}"
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Context:
     """Context object used in execution."""
     scopes: list[dict[str, Any]] = dataclasses.field(
@@ -69,7 +70,8 @@ class Context:
             if i is stdlib:
                 scopes += "Global"
             else:
-                scopes += ", "
+                scopes += repr(i)
+            scopes += ", "
         return f"Context(scopes=[{scopes.strip(', ')}])"
 
 
@@ -160,13 +162,18 @@ stdlib["None"] = None
 stdlib["Int"] = eager_fn(int)
 stdlib["Float"] = eager_fn(float)
 stdlib["Print"] = eager_fn(print)
+stdlib["Input"] = eager_fn(input)
+stdlib["Length"] = eager_fn(len)
 stdlib["Abs"] = eager_fn(abs)
+stdlib["Max"] = eager_fn(max)
+stdlib["Min"] = eager_fn(min)
 stdlib["Add"] = eager_fn(operator.add)
 stdlib["Sub"] = eager_fn(operator.sub)
 stdlib["Mul"] = eager_fn(operator.mul)
 stdlib["Div"] = eager_fn(operator.truediv)
 stdlib["Mod"] = eager_fn(operator.mod)
 stdlib["Pow"] = eager_fn(operator.pow)
+stdlib["Neg"] = eager_fn(operator.neg)
 stdlib["AndB"] = eager_fn(operator.and_)
 stdlib["XorB"] = eager_fn(operator.xor)
 stdlib["InvB"] = eager_fn(operator.inv)
@@ -180,6 +187,17 @@ stdlib["Le"] = eager_fn(operator.le)
 stdlib["Neq"] = eager_fn(operator.ne)
 stdlib["Gt"] = eager_fn(operator.gt)
 stdlib["Ge"] = eager_fn(operator.ge)
+stdlib["First"] = eager_fn(lambda l: l[0])
+stdlib["Second"] = eager_fn(lambda l: l[1])
+stdlib["Third"] = eager_fn(lambda l: l[2])
+stdlib["Fourth"] = eager_fn(lambda l: l[3])
+stdlib["Fifth"] = eager_fn(lambda l: l[4])
+stdlib["Sixth"] = eager_fn(lambda l: l[5])
+stdlib["Seventh"] = eager_fn(lambda l: l[6])
+stdlib["Eighth"] = eager_fn(lambda l: l[7])
+stdlib["Ninth"] = eager_fn(lambda l: l[8])
+stdlib["Tenth"] = eager_fn(lambda l: l[9])
+stdlib["Last"] = eager_fn(lambda l: l[-1])
 
 
 @std_fn("Def")
@@ -250,6 +268,71 @@ def let(ctx: Context, args: Sequence[Any]):
     return (yield exec_node(args[1], Context([let_scope, *ctx.scopes])))
 
 
+@std_fn("Lambda")
+def lambda_(ctx: Context, args: Sequence[Any]):
+    if (
+        len(args) != 2
+        or not isinstance(args[0], Node)
+        or not isinstance(args[1], (Node, Name, Const))
+    ):
+        raise TypeError
+
+    func_body = args[1]
+    func_defaults: dict[str, Any] = {}
+    func_args: list[str] = []
+
+    for i in args[0].children:
+        if isinstance(i, Node):
+            arg, default = i.children
+            if not isinstance(arg, Name):
+                raise TypeError
+            func_defaults[arg.value] = yield exec_node(default, ctx)
+            func_args.append(arg.value)
+        elif isinstance(i, Name):
+            func_args.append(i.value)
+        else:
+            raise TypeError
+
+    def lispy_func(ctx: Context, args: Sequence[Any]):
+        func_scope = func_defaults.copy()
+        for name, value in zip(func_args, args):
+            func_scope[name] = yield exec_node(value, ctx)
+        ctx = Context([func_scope, *ctx.scopes])
+        return (yield exec_node(func_body, ctx))
+
+    return lispy_func
+
+
+@std_fn("Apply")
+def apply(ctx: Context, args: Sequence[Any]):
+    if len(args) != 2:
+        raise TypeError
+    func: LispyFunc = yield exec_node(args[0], ctx)
+    func_args: Sequence[Any] = yield exec_node(args[1], ctx)
+    return (yield func(ctx, [Const(a) for a in func_args]))
+
+
+@std_fn("Include")
+def include(ctx: Context, args: Sequence[Any]):
+    if len(args) != 2 or not isinstance(args[1], Name):
+        raise TypeError
+
+    decl: str = yield exec_node(args[0], ctx)
+    if not isinstance(decl, str):
+        raise TypeError
+
+    spec = decl.split(".")
+    if not (obj := getattr(builtins, spec[0], None)):
+        obj = __import__(spec[0])
+
+    for i in spec[1:]:
+        obj = getattr(obj, i)
+
+    if callable(obj):
+        obj = eager_fn(obj)
+    ctx.scopes[0][args[1].value] = obj
+
+
 @std_fn("If")
 def if_(ctx: Context, args: Sequence[Any]) -> Any:
     """Conditionally execute expressions."""
@@ -262,11 +345,38 @@ def if_(ctx: Context, args: Sequence[Any]) -> Any:
     return None
 
 
+@std_fn("And")
+def and_(ctx: Context, args: Sequence[Any]) -> Any:
+    if len(args) != 2:
+        raise TypeError
+    return (yield exec_node(args[0], ctx)) and (yield exec_node(args[1], ctx))
+
+
 @std_fn("List")
 @eager_fn
 def list_(*args: Any) -> list[Any]:
     """Construct a list from arguments"""
     return list(args)
+
+
+@std_fn("Tuple")
+@eager_fn
+def tuple_(*args: Any) -> tuple[Any, ...]:
+    """Construct a tuple from arguments"""
+    return tuple(args)
+
+
+@std_fn("Set")
+@eager_fn
+def set_(*args: Any) -> set[Any]:
+    """Construct a set from arguments"""
+    return set(args)
+
+
+@std_fn("ReadLine")
+@eager_fn
+def read_line(file: IO[AnyStr] | None = None) -> str | bytes:
+    return (file or sys.stdin).readline()
 
 
 frame = sys._getframe(1)
