@@ -10,7 +10,6 @@ import dataclasses
 import tokenize
 import runpy
 import sys
-from collections import ChainMap
 from collections.abc import Callable, Generator, Sequence
 from typing import IO, Any, AnyStr, TypeAlias
 
@@ -19,6 +18,7 @@ __version__ = importlib.metadata.version("lispy")
 
 LispyFunc: TypeAlias = "Callable[[Context, Sequence[Node | Name | Const]], Generator]"
 stdlib: dict[str, Any] = {}
+_Sentinel = object()
 
 
 @dataclasses.dataclass(slots=True)
@@ -104,11 +104,9 @@ def lispy_exec(
     return res
 
 
-_Sentinel = object()
-
 def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
     stack = [exec_node(node, ctx)]
-    return_value = _Sentinel
+    return_value: Any = _Sentinel
     while stack:
         try:
             if return_value is _Sentinel:
@@ -116,9 +114,9 @@ def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
             else:
                 stack.append(stack[-1].send(return_value))
                 return_value = _Sentinel
-        except StopIteration as e:
+        except StopIteration as exc:
             stack.pop()
-            return_value = e.value
+            return_value = exc.value
     return return_value
 
 
@@ -128,10 +126,11 @@ def exec_node(node: Node | Name | Const, ctx: Context) -> Generator:
         func: LispyFunc = yield exec_node(node.children[0], ctx)
         return (yield func(ctx, node.children[1:]))
     if isinstance(node, Name):
-        try:
-            return ChainMap(*ctx.scopes)[node.value]
-        except KeyError:
-            raise NameError(f"name {node.value} is not defined") from None
+        name = node.value
+        for scope in ctx.scopes:
+            if name in scope:  # i swear this is faster
+                return scope[name]
+        raise NameError(f"name {node.value} is not defined")
     if isinstance(node, Const):
         return node.value
     raise TypeError
