@@ -22,6 +22,7 @@ import lispy
 - 55 built-in functions
 - Nearly-pure functional programming
 - Definitely very (((((((((((((lispy)))))))))))))
+- [Can solve AOC](https://github.com/dzshn/aoc2022/tree/main/09)
 
 ## TODO
 
