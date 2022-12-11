@@ -1,6 +1,6 @@
 # Lispy: Lisp-like Python magic
 
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/dzshn/lispy?style=for-the-badge&sort=semVer&include_prereleases)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/dzshn/lispy?style=for-the-badge&include_prereleases)](https://github.com/dzshn/lispy/releases/)
 ![GitHub top language](https://img.shields.io/github/languages/top/dzshn/lispy?style=for-the-badge)
 [![Powered by black magic](https://img.shields.io/badge/powered%20by-black%20magic-6f0b4f?style=for-the-badge&labelColor=24020f)](https://forthebadge.com/)
 
