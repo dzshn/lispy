@@ -229,6 +229,9 @@ stdlib["Ninth"] = eager_fn(lambda l: l[8])
 stdlib["Tenth"] = eager_fn(lambda l: l[9])
 stdlib["Last"] = eager_fn(lambda l: l[-1])
 stdlib["Nth"] = eager_fn(lambda *a: reduce(lambda l, i: l[i], a[-1:] + a[:-1]))
+stdlib["Drop"] = eager_fn(lambda i, l: l[i:])
+stdlib["Take"] = eager_fn(lambda i, l: l[:i])
+stdlib["Every"] = eager_fn(lambda i, l: l[::i])
 stdlib["Length"] = eager_fn(len)
 
 
