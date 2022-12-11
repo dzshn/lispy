@@ -8,6 +8,7 @@ import importlib.metadata
 import operator
 import dataclasses
 import tokenize
+import re
 import runpy
 import sys
 from collections.abc import Callable, Generator, Iterator, Sequence
@@ -173,28 +174,44 @@ def variadic_eager_fn(func: Callable[[Any, Any], Any]) -> LispyFunc:
     return wrapper
 
 
+def mangle_object(base: str, obj: object, names: list[str]) -> dict[str, object]:
+    variables = {}
+    if isinstance(obj, type):
+        variables[base] = obj
+
+    for name in names:
+        words = re.findall(r"[A-Z][a-z]*", name)
+        for attr in dir(obj):
+            if "".join(words).lower() == attr.lower():
+                value = getattr(obj, attr)
+                break
+            elif "_".join(words).lower() == attr.lower():
+                value = getattr(obj, attr)
+                break
+        else:
+            raise RuntimeError(f"Can't resolve {name} in {obj}")
+        if callable(value):
+            value = eager_fn(value)
+        variables[base + name] = value
+
+    return variables
+
+
 # Singletons
 stdlib["True"] = True
 stdlib["False"] = False
 stdlib["None"] = None
 stdlib["NotImplemented"] = NotImplemented
 
-# Types
-stdlib["Int"] = eager_fn(int)
-stdlib["Float"] = eager_fn(float)
-stdlib["Complex"] = eager_fn(complex)
-stdlib["List"] = eager_fn(lambda *a: list(a))
-stdlib["Tuple"] = eager_fn(lambda *a: tuple(a))
-stdlib["Set"] = eager_fn(lambda *a: set(a))
-stdlib["FrozenSet"] = eager_fn(lambda *a: frozenset(a))
-
+# Useful builtins
 stdlib["Print"] = eager_fn(print)
 stdlib["Input"] = eager_fn(input)
-stdlib["Abs"] = eager_fn(abs)
 stdlib["Max"] = eager_fn(max)
 stdlib["Min"] = eager_fn(min)
+stdlib["PyEval"] = eager_fn(eval)
 
 # Operators
+stdlib["Abs"] = eager_fn(abs)
 stdlib["Add"] = variadic_eager_fn(operator.add)
 stdlib["Sub"] = variadic_eager_fn(operator.sub)
 stdlib["Mul"] = variadic_eager_fn(operator.mul)
@@ -217,6 +234,8 @@ stdlib["Gt"] = eager_fn(operator.gt)
 stdlib["Ge"] = eager_fn(operator.ge)
 
 # Arrays
+stdlib["List"] = eager_fn(lambda *a: list(a))
+stdlib["Tuple"] = eager_fn(lambda *a: tuple(a))
 stdlib["First"] = eager_fn(lambda l: l[0])
 stdlib["Second"] = eager_fn(lambda l: l[1])
 stdlib["Third"] = eager_fn(lambda l: l[2])
@@ -232,7 +251,46 @@ stdlib["Nth"] = eager_fn(lambda *a: reduce(lambda l, i: l[i], a[-1:] + a[:-1]))
 stdlib["Drop"] = eager_fn(lambda i, l: l[i:])
 stdlib["Take"] = eager_fn(lambda i, l: l[:i])
 stdlib["Every"] = eager_fn(lambda i, l: l[::i])
+stdlib["Append"] = eager_fn(lambda l, x: l + [x])
+stdlib["Pop"] = eager_fn(lambda l: l[:-1])
 stdlib["Length"] = eager_fn(len)
+stdlib["Map"] = eager_fn(lambda f, l: list(map(f, l)))
+stdlib["Reduce"] = eager_fn(reduce)
+
+stdlib |= mangle_object("Str", str, [
+    "Capitalize", "Casefold", "Center", "Count", "Encode", "EndsWith",
+    "ExpandTabs", "Find", "Format", "FormatMap", "Index", "IsAlnum", "IsAlpha",
+    "IsAscii", "IsDecimal", "IsDigit", "IsIdentifier", "IsLower", "IsNumeric",
+    "IsPrintable", "IsSpace", "IsTitle", "IsUpper", "Join", "LJust", "Lower",
+    "LStrip", "MakeTrans", "Partition", "RemovePrefix", "RemoveSuffix",
+    "Replace", "RFind", "RIndex", "RJust", "RPartition", "RSplit", "RStrip",
+    "Split", "SplitLines", "StartsWith", "Strip", "SwapCase", "Title",
+    "Translate", "Upper", "Zfill",
+])
+stdlib |= mangle_object("Set", set, [
+    "Difference", "Intersection", "IsDisjoint", "IsSubset", "IsSuperset",
+    "SymmetricDifference", "Union"
+])
+stdlib |= mangle_object("FrozenSet", frozenset, [
+    "Difference", "Intersection", "IsDisjoint", "IsSubset", "IsSuperset",
+    "SymmetricDifference", "Union"
+])
+stdlib |= mangle_object("Re", re, [
+    "ASCII", "DOTALL", "IGNORECASE", "LOCALE", "MULTILINE", "VERBOSE",
+    "Compile", "Escape", "FindAll", "FullMatch", "Search", "Split", "Sub",
+])
+stdlib |= mangle_object("Int", int, [
+    "BitCount", "BitLength", "FromBytes", "ToBytes"
+])
+stdlib |= mangle_object("Float", float, ["FromHex", "Hex"])
+stdlib["Complex"] = eager_fn(complex)
+stdlib["Real"] = eager_fn(lambda x: x.real)
+stdlib["Imag"] = eager_fn(lambda x: x.imag)
+stdlib["Conjugate"] = eager_fn(lambda x: x.conjugate())
+stdlib["IntegerRatio"] = eager_fn(lambda x: x.as_integer_ratio())
+stdlib["IsInteger"] = eager_fn(
+    lambda x: getattr(x, "is_integer", lambda: isinstance(x, int))()
+)
 
 
 @std_fn("Def")
@@ -468,6 +526,16 @@ def set_(*args: Any) -> set[Any]:
 @eager_fn
 def read_line(file: IO[AnyStr] | None = None) -> str | bytes:
     return (file or sys.stdin).readline()
+
+
+@std_fn("Eval")
+@eager_fn
+def lispy_eval(src: str) -> Any:
+    def _rl():
+        yield from [src.encode(), b""]
+    for i in lispy_exec(lispy_parse(_rl().__next__)):
+        if i is not None:
+            return i
 
 
 frame = sys._getframe(1)
