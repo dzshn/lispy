@@ -1,4 +1,4 @@
 import lispy
 
 
-(Print @"hai :3")
+"hai :3"

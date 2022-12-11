@@ -11,12 +11,15 @@ import tokenize
 import runpy
 import sys
 from collections.abc import Callable, Generator, Iterator, Sequence
+from functools import reduce
 from typing import IO, Any, AnyStr, TypeAlias
 
 
 __version__ = importlib.metadata.version("lispy")
 
-LispyFunc: TypeAlias = "Callable[[Context, Sequence[Node | Name | Const]], Generator]"
+LispyFunc: TypeAlias = (
+    "Callable[[Context, Sequence[Node | Name | Const]], Generator]"
+)
 stdlib: dict[str, Any] = {}
 _Sentinel = object()
 
@@ -63,7 +66,7 @@ class Context:
     scopes: list[dict[str, Any]] = dataclasses.field(
         default_factory=lambda: [{}, stdlib]
     )
-    recallable: list[LispyFunc] = dataclasses.field(
+    callees: list[LispyFunc] = dataclasses.field(
         default_factory=lambda: []
     )
 
@@ -100,10 +103,10 @@ def lispy_parse(readline: Callable[[], bytes]) -> Node:
     return root
 
 
-def lispy_exec(root: Node) -> Iterator[Any]:
+def lispy_exec(root: Node, ctx: Context | None = None) -> Iterator[Any]:
     """Execute lispy code."""
 
-    ctx = Context()
+    ctx = ctx or Context()
 
     for node in root.children:
         yield exec_in_trampoline(node, ctx)
@@ -160,28 +163,49 @@ def eager_fn(func: Callable[..., Any]) -> LispyFunc:
     return wrapper
 
 
+def variadic_eager_fn(func: Callable[[Any, Any], Any]) -> LispyFunc:
+    def wrapper(ctx: Context, args: Sequence[Any]):
+        new_args = []
+        for a in args:
+            new_args.append((yield exec_node(a, ctx)))
+        return reduce(func, new_args)
+
+    return wrapper
+
+
+# Singletons
 stdlib["True"] = True
 stdlib["False"] = False
 stdlib["None"] = None
+stdlib["NotImplemented"] = NotImplemented
+
+# Types
 stdlib["Int"] = eager_fn(int)
 stdlib["Float"] = eager_fn(float)
+stdlib["Complex"] = eager_fn(complex)
+stdlib["List"] = eager_fn(lambda *a: list(a))
+stdlib["Tuple"] = eager_fn(lambda *a: tuple(a))
+stdlib["Set"] = eager_fn(lambda *a: set(a))
+stdlib["FrozenSet"] = eager_fn(lambda *a: frozenset(a))
+
 stdlib["Print"] = eager_fn(print)
 stdlib["Input"] = eager_fn(input)
-stdlib["Length"] = eager_fn(len)
 stdlib["Abs"] = eager_fn(abs)
 stdlib["Max"] = eager_fn(max)
 stdlib["Min"] = eager_fn(min)
-stdlib["Add"] = eager_fn(operator.add)
-stdlib["Sub"] = eager_fn(operator.sub)
-stdlib["Mul"] = eager_fn(operator.mul)
-stdlib["Div"] = eager_fn(operator.truediv)
-stdlib["Mod"] = eager_fn(operator.mod)
+
+# Operators
+stdlib["Add"] = variadic_eager_fn(operator.add)
+stdlib["Sub"] = variadic_eager_fn(operator.sub)
+stdlib["Mul"] = variadic_eager_fn(operator.mul)
+stdlib["Div"] = variadic_eager_fn(operator.truediv)
+stdlib["Mod"] = variadic_eager_fn(operator.mod)
 stdlib["Pow"] = eager_fn(operator.pow)
 stdlib["Neg"] = eager_fn(operator.neg)
-stdlib["AndB"] = eager_fn(operator.and_)
-stdlib["XorB"] = eager_fn(operator.xor)
+stdlib["AndB"] = variadic_eager_fn(operator.and_)
+stdlib["XorB"] = variadic_eager_fn(operator.xor)
+stdlib["OrB"] = variadic_eager_fn(operator.or_)
 stdlib["InvB"] = eager_fn(operator.inv)
-stdlib["OrB"] = eager_fn(operator.or_)
 stdlib["LShift"] = eager_fn(operator.lshift)
 stdlib["RShift"] = eager_fn(operator.rshift)
 stdlib["Eq"] = eager_fn(operator.eq)
@@ -191,6 +215,8 @@ stdlib["Le"] = eager_fn(operator.le)
 stdlib["Neq"] = eager_fn(operator.ne)
 stdlib["Gt"] = eager_fn(operator.gt)
 stdlib["Ge"] = eager_fn(operator.ge)
+
+# Arrays
 stdlib["First"] = eager_fn(lambda l: l[0])
 stdlib["Second"] = eager_fn(lambda l: l[1])
 stdlib["Third"] = eager_fn(lambda l: l[2])
@@ -202,6 +228,8 @@ stdlib["Eighth"] = eager_fn(lambda l: l[7])
 stdlib["Ninth"] = eager_fn(lambda l: l[8])
 stdlib["Tenth"] = eager_fn(lambda l: l[9])
 stdlib["Last"] = eager_fn(lambda l: l[-1])
+stdlib["Nth"] = eager_fn(lambda *a: reduce(lambda l, i: l[i], a[-1:] + a[:-1]))
+stdlib["Length"] = eager_fn(len)
 
 
 @std_fn("Def")
@@ -247,7 +275,11 @@ def define(ctx: Context, args: Sequence[Any]):
             for scope in ctx.scopes:
                 if set(scope) != func_vars:
                     scopes.append(scope)
-            ctx = Context(scopes, [lispy_func] + ctx.recallable)
+            callees: list[LispyFunc] = [lispy_func]
+            for func in ctx.callees:
+                if func is not lispy_func:
+                    callees.append(func)
+            ctx = Context(scopes, callees)
             return (yield exec_node(func_body, ctx))
 
         ctx.scopes[0][name] = lispy_func
@@ -281,7 +313,7 @@ def let(ctx: Context, args: Sequence[Any]):
         if set(scope) != let_vars:
             scopes.append(scope)
 
-    return (yield exec_node(args[1], Context(scopes, ctx.recallable)))
+    return (yield exec_node(args[1], Context(scopes, ctx.callees)))
 
 
 @std_fn("Lambda")
@@ -319,7 +351,11 @@ def lambda_(ctx: Context, args: Sequence[Any]):
         for scope in ctx.scopes:
             if set(scope) != func_vars:
                 scopes.append(scope)
-        ctx = Context(scopes, [lispy_func] + ctx.recallable)
+        callees: list[LispyFunc] = [lispy_func]
+        for func in ctx.callees:
+            if func is not lispy_func:
+                callees.append(func)
+        ctx = Context(scopes, callees)
         return (yield exec_node(func_body, ctx))
 
     return lispy_func
@@ -336,12 +372,12 @@ def apply(ctx: Context, args: Sequence[Any]):
 
 @std_fn("Recall")
 def recall(ctx: Context, args: Sequence[Any]):
-    return (yield ctx.recallable[-1](ctx, args))
+    return (yield ctx.callees[0](ctx, args))
 
 
 @std_fn("Include")
 def include(ctx: Context, args: Sequence[Any]):
-    if len(args) != 2 or not isinstance(args[1], Name):
+    if len(args) not in {1, 2}:
         raise TypeError
 
     decl: str = yield exec_node(args[0], ctx)
@@ -355,9 +391,26 @@ def include(ctx: Context, args: Sequence[Any]):
     for i in spec[1:]:
         obj = getattr(obj, i)
 
-    if callable(obj):
-        obj = eager_fn(obj)
-    ctx.scopes[0][args[1].value] = obj
+    base = "".join(i.title() for i in spec)
+    if len(args) == 2:
+        if not isinstance(args[1], Name):
+            raise TypeError
+        base = args[1].value
+
+    if callable(obj) and not isinstance(obj, type):
+        ctx.scopes[0][base] = eager_fn(obj)
+        return
+
+    if isinstance(obj, type):
+        ctx.scopes[0][base] = eager_fn(obj)
+    else:
+        ctx.scopes[0][base] = obj
+
+    for attr in dir(obj):
+        value = getattr(obj, attr)
+        if callable(value):
+            value = eager_fn(value)
+        ctx.scopes[0][base + attr.title()] = value
 
 
 @std_fn("If")
@@ -377,6 +430,13 @@ def and_(ctx: Context, args: Sequence[Any]) -> Any:
     if len(args) != 2:
         raise TypeError
     return (yield exec_node(args[0], ctx)) and (yield exec_node(args[1], ctx))
+
+
+@std_fn("Or")
+def or_(ctx: Context, args: Sequence[Any]) -> Any:
+    if len(args) != 2:
+        raise TypeError
+    return (yield exec_node(args[0], ctx)) or (yield exec_node(args[1], ctx))
 
 
 @std_fn("List")

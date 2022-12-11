@@ -7,7 +7,7 @@ import sys
 from collections.abc import Generator
 
 import lispy
-from lispy import lispy_exec, lispy_parse
+from lispy import Context, lispy_exec, lispy_parse
 
 ENVIRONMENT = (
     f"LisPy {lispy.__version__} on "
@@ -68,6 +68,8 @@ def main() -> None:
         print(ENVIRONMENT)
         print(COPYRIGHT)
 
+        ctx = Context()
+
         while True:
             try:
                 src = input("(>>>) ").encode() + b"\n"
@@ -92,7 +94,7 @@ def main() -> None:
                 continue
 
             try:
-                for i in lispy_exec(node):
+                for i in lispy_exec(node, ctx):
                     if i is not None:
                         print(i)
             except (Exception, KeyboardInterrupt):
