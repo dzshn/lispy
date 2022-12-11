@@ -1,5 +1,9 @@
 # Lispy: Lisp-like Python magic
 
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/dzshn/lispy?style=for-the-badge&sort=semVer&include_prereleases)
+![GitHub top language](https://img.shields.io/github/languages/top/dzshn/lispy?style=for-the-badge)
+[![Powered by black magic](https://img.shields.io/badge/powered%20by-black%20magic-6f0b4f?style=for-the-badge&labelColor=24020f)](https://forthebadge.com/)
+
 ```py
 import lispy
 
@@ -14,14 +18,18 @@ import lispy
 ## Features
 
 - Virtually infinite recursion (based on [trampolines](https://en.wikipedia.org/wiki/Trampoline_(computing)))
-- Python data types, lisp structure
-- Built-in REPL
+- Interoperability with Python objects
+- 55 built-in functions
+- Nearly-pure functional programming
+- Definitely very (((((((((((((lispy)))))))))))))
 
 ## TODO
 
 - [x] Trampoline executor
 - [ ] Tail recursion optimisation
-- [x] More interop with Python
+- [ ] Interoperability with Python
+    - [x] Python -> Lispy
+    - [ ] Lispy -> Python
 - [ ] Docstrings
 - [ ] Do all (or a large subset of) ANSI CL or Scheme or Clojure or another major dialect
 

@@ -12,7 +12,7 @@ Define a function or variable on current scope
 
 (Square@ 7)  # => 49
 
-(Def@ Explod (x (y 2))  # y defaults to 0
+(Def@ Explod (x (y 2))  # y defaults to 2
     (Pow x y))
 
 (Explod@ 9)   # => 81
