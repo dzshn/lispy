@@ -268,9 +268,9 @@ def define(ctx: Context, args: Sequence[Any]):
         def lispy_func(ctx: Context, args: Sequence[Any]):
             func_scope = func_defaults.copy()
             scopes = [func_scope]
-            for name, value in zip(func_args, args):
+            for arg, value in zip(func_args, args):
                 value = yield exec_node(value, ctx)
-                func_scope[name] = value
+                func_scope[arg] = value
             func_vars = set(func_scope)
             for scope in ctx.scopes:
                 if set(scope) != func_vars:
@@ -298,6 +298,12 @@ def let(ctx: Context, args: Sequence[Any]):
     else:
         declarations = [args[0]]
 
+    let_vars = set(let_scope)
+    for scope in ctx.scopes:
+        if set(scope) != let_vars:
+            scopes.append(scope)
+
+    ctx = Context(scopes, ctx.callees)
     for decl in declarations:
         if not isinstance(decl, Node):
             raise TypeError
@@ -308,12 +314,7 @@ def let(ctx: Context, args: Sequence[Any]):
                 raise TypeError
             let_scope[i.value] = value
 
-    let_vars = set(let_scope)
-    for scope in ctx.scopes:
-        if set(scope) != let_vars:
-            scopes.append(scope)
-
-    return (yield exec_node(args[1], Context(scopes, ctx.callees)))
+    return (yield exec_node(args[1], ctx))
 
 
 @std_fn("Lambda")
