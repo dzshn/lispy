@@ -195,7 +195,7 @@ def variadic_eager_fn(func: Callable[[Any, Any], Any]) -> LispyFunc:
 def mangle_object(base: str, obj: object, names: list[str]) -> dict[str, object]:
     variables = {}
     if isinstance(obj, type):
-        variables[base] = obj
+        variables[base] = eager_fn(obj)
 
     for name in names:
         words = re.findall(r"[A-Z][a-z]*", name)
