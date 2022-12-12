@@ -70,6 +70,7 @@ class Context:
     callees: list[LispyFunc] = dataclasses.field(
         default_factory=lambda: []
     )
+    stack: list[Trampolinable[Any]] | None = None
 
     def __repr__(self) -> str:
         scopes = str()
@@ -115,6 +116,7 @@ def lispy_exec(root: Node, ctx: Context | None = None) -> Iterator[Any]:
 
 def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
     stack = [exec_node(node, ctx)]
+    ctx.stack = stack
     return_value: Any = _Sentinel
     while stack:
         try:
@@ -139,7 +141,7 @@ def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
                     node = frame.f_locals["node"]
                     ctx = frame.f_locals["ctx"]
                     if ctx.callees:
-                        print(f"  On {ctx.callees[0]}, {ctx.scopes[0]}", file=sys.stderr)
+                        print(f"  On {ctx.callees[0]}", file=sys.stderr)
                     print(f"  Executing node, {len(ctx.scopes)} scopes", file=sys.stderr)
                     print(f"    {node}", file=sys.stderr)
                     continue
@@ -360,7 +362,7 @@ def define(ctx: Context, args: Sequence[Any]) -> Trampolinable[None]:
             for func in ctx.callees:
                 if func is not lispy_func:
                     callees.append(func)
-            ctx = Context(scopes, callees)
+            ctx = Context(scopes, callees, ctx.stack)
             return (yield exec_node(func_body, ctx))
 
         ctx.scopes[0][name] = lispy_func
@@ -384,7 +386,7 @@ def let(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
         if set(scope) != let_vars:
             scopes.append(scope)
 
-    ctx = Context(scopes, ctx.callees)
+    ctx = Context(scopes, ctx.callees, ctx.stack)
     for decl in declarations:
         if not isinstance(decl, Node):
             raise TypeError
@@ -437,7 +439,7 @@ def lambda_(ctx: Context, args: Sequence[Any]) -> Trampolinable[LispyFunc]:
         for func in ctx.callees:
             if func is not lispy_func:
                 callees.append(func)
-        ctx = Context(scopes, callees)
+        ctx = Context(scopes, callees, ctx.stack)
         return (yield exec_node(func_body, ctx))
 
     return lispy_func
@@ -455,6 +457,44 @@ def apply(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
 @std_fn("Recall")
 def recall(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     return (yield ctx.callees[0](ctx, args))
+
+
+@std_fn("TailCall")
+def tail_call(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
+    assert ctx.stack
+    stack = ctx.stack
+    func: LispyFunc = yield exec_node(args[0], ctx)
+    while stack[-1].gi_code is not func.__code__:
+        stack.pop()
+    stack.pop()
+
+    return (yield func(ctx, args[1:]))
+
+
+@std_fn("Recur")
+def recur(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
+    assert ctx.stack
+    stack = ctx.stack
+    func = ctx.callees[0]
+    while stack[-1].gi_code is not func.__code__:
+        stack.pop()
+    stack.pop()
+
+    return (yield func(ctx, args))
+
+
+@std_fn("ApplyRecur")
+def apply_recur(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
+    if len(args) != 1:
+        raise TypeError
+    assert ctx.stack
+    stack = ctx.stack
+    func = ctx.callees[0]
+    func_args: Sequence[Any] = yield exec_node(args[0], ctx)
+    while stack[-1].gi_code is not func.__code__:
+        stack.pop()
+    stack.pop()
+    return (yield func(ctx, [Const(a) for a in func_args]))
 
 
 @std_fn("Include")

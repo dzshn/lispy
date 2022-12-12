@@ -32,9 +32,9 @@ import lispy
 (Def@ MoveSegments (knots, (n* 0))
     (If (Eq@ n, (Sub (Length@ knots), 1)),
         knots,
-        (MoveSegments (Add (Take (Add@ n, 1), knots)
-                           (List (MoveSegment (Nth (Add@ 1, n), knots) (Nth@ n, knots)))
-                           (Drop (Add@ n, 2), knots)),
+        (Recur (Add (Take (Add@ n, 1), knots)
+                    (List (MoveSegment (Nth (Add@ 1, n), knots) (Nth@ n, knots)))
+                    (Drop (Add@ n, 2), knots)),
             (Add@ 1, n))))
 
 (Def@ Move (knots, dir, times, visited)
@@ -42,12 +42,12 @@ import lispy
         (Tuple@ knots, visited)
         (Let (head (MoveHead (Nth@ 0, knots), dir))
             (Let (knots (MoveSegments (Add (List@ head) (Drop@ 1, knots))))
-                (Move@ knots, dir, (Sub@ times, 1), (SetUnion@ visited, (Set (Last@ knots))))))))
+                (Recur@ knots, dir, (Sub@ times, 1), (SetUnion@ visited, (Set (Last@ knots))))))))
 
 (Def@ Aoc ((knots* (Mul@ 10, (List@ (Tuple@ 0, 0)))) (visited@ (Set@ (Tuple@ 0, 0))))
     (Let (line (StrSplit (ReadLine)))
         (If (Not@ line),
             visited,
-            (Apply@ Aoc@ (Move@ knots, (Direction@ (First@ line)), (Int@ (Second@ line)), visited)))))
+            (ApplyRecur@ (Move@ knots, (Direction@ (First@ line)), (Int@ (Second@ line)), visited)))))
 
 (Length (Aoc))

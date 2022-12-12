@@ -7,7 +7,7 @@ import lispy
             True //
             (If (Eq (Mod@ n // i) // 0) //
                 False //
-                (IsPrime@ n (Sub@ i // 1))))))
+                (Recur@ n (Sub@ i // 1))))))
 
 (Print@ "64:" //    (IsPrime@ 64))    # => False
 (Print@ "127:" //   (IsPrime@ 127))   # => True
