@@ -14,13 +14,15 @@ import runpy
 import sys
 from collections.abc import Callable, Generator, Iterator, Sequence
 from functools import reduce
-from typing import IO, Any, AnyStr, TypeAlias
+from typing import IO, Any, AnyStr, TypeAlias, TypeVar
 
 
 __version__ = importlib.metadata.version("lispy")
 
+T = TypeVar("T")
+Trampolinable: TypeAlias = Generator[Any, Any, T]
 LispyFunc: TypeAlias = (
-    "Callable[[Context, Sequence[Node | Name | Const]], Generator]"
+    "Callable[[Context, Sequence[Node | Name | Const]], Trampolinable]"
 )
 stdlib: dict[str, Any] = {}
 _Sentinel = object()
@@ -147,7 +149,7 @@ def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
     return return_value
 
 
-def exec_node(node: Node | Name | Const, ctx: Context) -> Generator:
+def exec_node(node: Node | Name | Const, ctx: Context) -> Trampolinable[Any]:
     """Main execution function. No longer awfully recursive."""
     if isinstance(node, Node):
         func: LispyFunc = yield exec_node(node.children[0], ctx)
@@ -173,7 +175,7 @@ def std_fn(name: str) -> Callable[[LispyFunc], Any]:
 
 def eager_fn(func: Callable[..., Any]) -> LispyFunc:
     """Wrapper for functions requiring immediately executed args."""
-    def wrapper(ctx: Context, args: Sequence[Any]):
+    def wrapper(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
         new_args = []
         for a in args:
             new_args.append((yield exec_node(a, ctx)))
@@ -183,7 +185,7 @@ def eager_fn(func: Callable[..., Any]) -> LispyFunc:
 
 
 def variadic_eager_fn(func: Callable[[Any, Any], Any]) -> LispyFunc:
-    def wrapper(ctx: Context, args: Sequence[Any]):
+    def wrapper(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
         new_args = []
         for a in args:
             new_args.append((yield exec_node(a, ctx)))
@@ -312,7 +314,7 @@ stdlib["IsInteger"] = eager_fn(
 
 
 @std_fn("Def")
-def define(ctx: Context, args: Sequence[Any]):
+def define(ctx: Context, args: Sequence[Any]) -> Trampolinable[None]:
     """Define a function or variable."""
     if len(args) not in {2, 3} or not isinstance(args[0], Name):
         raise TypeError
@@ -344,7 +346,7 @@ def define(ctx: Context, args: Sequence[Any]):
             else:
                 raise TypeError
 
-        def lispy_func(ctx: Context, args: Sequence[Any]):
+        def lispy_func(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
             func_scope = func_defaults.copy()
             scopes = [func_scope]
             for arg, value in zip(func_args, args):
@@ -365,7 +367,7 @@ def define(ctx: Context, args: Sequence[Any]):
 
 
 @std_fn("Let")
-def let(ctx: Context, args: Sequence[Any]):
+def let(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     """Initialize variables in new scope and execute a expression."""
     if len(args) != 2 or not isinstance(args[0], Node):
         raise TypeError
@@ -397,7 +399,7 @@ def let(ctx: Context, args: Sequence[Any]):
 
 
 @std_fn("Lambda")
-def lambda_(ctx: Context, args: Sequence[Any]):
+def lambda_(ctx: Context, args: Sequence[Any]) -> Trampolinable[LispyFunc]:
     if (
         len(args) != 2
         or not isinstance(args[0], Node)
@@ -421,7 +423,7 @@ def lambda_(ctx: Context, args: Sequence[Any]):
         else:
             raise TypeError
 
-    def lispy_func(ctx: Context, args: Sequence[Any]):
+    def lispy_func(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
         func_scope = func_defaults.copy()
         scopes = [func_scope]
         for name, value in zip(func_args, args):
@@ -442,7 +444,7 @@ def lambda_(ctx: Context, args: Sequence[Any]):
 
 
 @std_fn("Apply")
-def apply(ctx: Context, args: Sequence[Any]):
+def apply(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     if len(args) != 2:
         raise TypeError
     func: LispyFunc = yield exec_node(args[0], ctx)
@@ -451,12 +453,12 @@ def apply(ctx: Context, args: Sequence[Any]):
 
 
 @std_fn("Recall")
-def recall(ctx: Context, args: Sequence[Any]):
+def recall(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     return (yield ctx.callees[0](ctx, args))
 
 
 @std_fn("Include")
-def include(ctx: Context, args: Sequence[Any]):
+def include(ctx: Context, args: Sequence[Any]) -> Trampolinable[None]:
     if len(args) not in {1, 2}:
         raise TypeError
 
@@ -494,7 +496,7 @@ def include(ctx: Context, args: Sequence[Any]):
 
 
 @std_fn("If")
-def if_(ctx: Context, args: Sequence[Any]) -> Any:
+def if_(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     """Conditionally execute expressions."""
     if len(args) not in {2, 3}:
         raise TypeError
@@ -506,14 +508,14 @@ def if_(ctx: Context, args: Sequence[Any]) -> Any:
 
 
 @std_fn("And")
-def and_(ctx: Context, args: Sequence[Any]) -> Any:
+def and_(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     if len(args) != 2:
         raise TypeError
     return (yield exec_node(args[0], ctx)) and (yield exec_node(args[1], ctx))
 
 
 @std_fn("Or")
-def or_(ctx: Context, args: Sequence[Any]) -> Any:
+def or_(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     if len(args) != 2:
         raise TypeError
     return (yield exec_node(args[0], ctx)) or (yield exec_node(args[1], ctx))
