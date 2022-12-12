@@ -8,6 +8,7 @@ import importlib.metadata
 import operator
 import dataclasses
 import tokenize
+import traceback
 import re
 import runpy
 import sys
@@ -33,11 +34,8 @@ class Node:
 
     def __repr__(self) -> str:
         body = str()
-        for i, child in enumerate(self.children):
-            if i == 0:
-                body += repr(child).strip("@%")
-            else:
-                body += repr(child)
+        for child in self.children:
+            body += repr(child)
             body += " "
 
         return "(" + body.strip() + ")"
@@ -49,7 +47,7 @@ class Name:
     value: str
 
     def __repr__(self) -> str:
-        return f"@{self.value}"
+        return self.value
 
 
 @dataclasses.dataclass(slots=True)
@@ -58,7 +56,7 @@ class Const:
     value: str | int | float
 
     def __repr__(self) -> str:
-        return f"%{self.value!r}"
+        return repr(self.value)
 
 
 @dataclasses.dataclass(slots=True)
@@ -126,6 +124,26 @@ def exec_in_trampoline(node: Node | Name | Const, ctx: Context) -> Any:
         except StopIteration as exc:
             stack.pop()
             return_value = exc.value
+        except Exception:
+            print("Lispy traceback (most recent call last):", file=sys.stderr)
+            for g in stack:
+                if g.gi_frame is None:
+                    # whyyyy
+                    print("  Executing ??? (missing frame)", file=sys.stderr)
+                    print(f"  (Guilty generator is {g})\n", file=sys.stderr)
+                    continue
+                frame = g.gi_frame
+                if g.gi_code is exec_node.__code__:
+                    node = frame.f_locals["node"]
+                    ctx = frame.f_locals["ctx"]
+                    if ctx.callees:
+                        print(f"  On {ctx.callees[0]}, {ctx.scopes[0]}", file=sys.stderr)
+                    print(f"  Executing node, {len(ctx.scopes)} scopes", file=sys.stderr)
+                    print(f"    {node}", file=sys.stderr)
+                    continue
+                location = getattr(g, "__qualname__", "???")
+                print(f"  Called from {location} @ line {frame.f_lineno}\n", file=sys.stderr)
+            raise
     return return_value
 
 
