@@ -561,6 +561,16 @@ def or_(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
     return (yield exec_node(args[0], ctx)) or (yield exec_node(args[1], ctx))
 
 
+@std_fn("Cond")
+def cond(ctx: Context, args: Sequence[Any]) -> Trampolinable[Any]:
+    for node in args:
+        if not isinstance(node, Node):
+            raise TypeError
+        test, action = node.children
+        if (yield exec_node(test, ctx)):
+            return (yield exec_node(action, ctx))
+
+
 @std_fn("List")
 @eager_fn
 def list_(*args: Any) -> list[Any]:

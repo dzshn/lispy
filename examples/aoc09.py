@@ -4,13 +4,10 @@ import lispy
 (Include@ "set.union")
 
 (Def@ Direction (dir)
-    (If (Eq@ dir, "D")
-        (Tuple@ 1, 0)
-        (If (Eq@ dir, "L")
-            (Tuple@ 0, 1)
-            (If (Eq@ dir, "U")
-                (Tuple@ (Neg@ 1), 0)
-                (Tuple@ 0, (Neg@ 1))))))
+    (Cond ((Eq@ dir, "D"), (Tuple@ 1, 0)),
+          ((Eq@ dir, "L"), (Tuple@ 0, 1)),
+          ((Eq@ dir, "U"), (Tuple@ (Neg@ 1), 0)),
+          ((Eq@ dir, "R"), (Tuple@ 0, (Neg@ 1)))))
 
 (Def@ Clamp (x)
     (Int (And@ x (Div@ x (Abs@ x)))))
